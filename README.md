@@ -1,6 +1,6 @@
 # Draft Airuno
 
-Un draft a due con gli ex dell'U.S.O. Airuno Open A. Per ogni posto in campo escono tre giocatori a caso e ne scegli uno, senza vedere quanto è forte. Poi si giocano andata e ritorno simulate, con marcatori e minuti, e se serve si va ai rigori.
+Un draft a due con gli ex dell'U.S.O. Airuno Open A. Per ogni posto in campo escono tre giocatori a caso e ne scegli uno. Poi si giocano andata e ritorno simulate, con marcatori e minuti, e se serve si va ai rigori.
 
 Si gioca dal browser del telefono: niente app da installare, niente account, niente server.
 

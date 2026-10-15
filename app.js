@@ -319,7 +319,7 @@ function endHTML(actions) {
   ${legsBox(true)}
   <div class="scorers">${[0, 1].map(t => `<p><b style="color:${TC[t]}">${esc(T(t).name)}</b> · ${sc(t)}</p>`).join('')}</div>${actions}`;
 }
-const intro = `<p class="muted">Per ogni posto in campo escono tre giocatori a caso: ne scegli uno. La forza non si vede. Andata e ritorno, e se serve si va ai rigori.</p>`;
+const intro = `<p class="muted">Per ogni posto in campo escono tre giocatori a caso: ne scegli uno. Andata e ritorno, e se serve si va ai rigori.</p>`;
 const rulesNote = () => `<p class="note">Andata in casa di ${esc(T(0).name)}, ritorno in casa di ${esc(T(1).name)}. Conta chi vince più partite: con una vittoria a testa o due pareggi si va ai rigori.</p>`;
 
 /* ---------- vista: un telefono ---------- */
