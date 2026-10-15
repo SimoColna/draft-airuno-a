@@ -1,0 +1,4 @@
+# la lista con i livelli in chiaro resta fuori dal repo
+*.csv
+.DS_Store
+node_modules/
