@@ -34,4 +34,5 @@ Non scrivere mai i livelli in chiaro in un file del repo, in un messaggio di com
 - Il test "due telefoni calcolano la stessa sfida" deve restare verde.
 - Sito statico senza build: `index.html`, `style.css`, `app.js`, `data.js`, librerie in `vendor/`. Font da Google Fonts.
 - Interfaccia pensata per il telefono (circa 390 px), tema scuro unico.
-- Durante l'animazione della partita aggiorna solo punteggio, minuto e la riga nuova del tabellino: ridisegnare tutta la pagina causa lo sfarfallio già corretto una volta.
+- Durante l'animazione della partita aggiorna solo punteggio, minuto e la riga nuova del tabellino: ridisegnare tutta la pagina causa lo sfarfallio già corretto una volta. Ai rigori si aggiorna solo `#shootlive`. In entrambi i casi lo slider della velocità non va ridisegnato, altrimenti si interrompe il trascinamento.
+- Velocità: 5 livelli (`SPEEDS`), predefinito "Normale" (300 ms per minuto di gioco); il pulsante "Veloce" porta al livello 5, cioè la velocità originale (110 ms). La scelta resta salvata sul telefono.

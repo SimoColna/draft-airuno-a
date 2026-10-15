@@ -176,6 +176,26 @@ function buildDuel() {
   D.shown = 0; D.phase = 'reveal';
 }
 
+/* ---------- velocità delle animazioni ----------
+   millisecondi per minuto di gioco; il livello 5 è la velocità originale */
+const SPEEDS = [null, { lab: 'Molto lenta', ms: 750 }, { lab: 'Lenta', ms: 480 }, { lab: 'Normale', ms: 300 }, { lab: 'Svelta', ms: 180 }, { lab: 'Veloce', ms: 110 }];
+const DEFAULT_SPEED = 3, FAST_SPEED = 5;
+let SPEED = +store.get('draftAiruno.speed') || DEFAULT_SPEED;
+if (!SPEEDS[SPEED]) SPEED = DEFAULT_SPEED;
+const msPerMinute = () => SPEEDS[SPEED].ms;
+const halfTimePause = () => Math.max(900, msPerMinute() * 4);
+const kickPause = () => 500 + msPerMinute() * 3;
+function setSpeed(v) {
+  SPEED = Math.min(FAST_SPEED, Math.max(1, Math.round(v)));
+  store.set('draftAiruno.speed', SPEED);
+  const sl = $('#spd'), lab = $('#spdlab');
+  if (sl) sl.value = SPEED;
+  if (lab) lab.textContent = SPEEDS[SPEED].lab;
+}
+const speedHTML = () => `<div class="speed"><label class="lbl" for="spd">Velocità · <span id="spdlab">${SPEEDS[SPEED].lab}</span></label>
+  <div class="speedrow"><input type="range" id="spd" min="1" max="${FAST_SPEED}" step="1" value="${SPEED}" aria-label="Velocità della simulazione">
+  <button class="ghost" id="fast">Veloce</button></div></div>`;
+
 /* ---------- animazioni: aggiornano solo i pezzi che cambiano ---------- */
 let anim = null, kickAnim = null;
 const reduced = () => window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -197,7 +217,7 @@ function animateMatch(idx) {
     }
     if (ck) ck.textContent = anim.clock <= 90 ? `${anim.clock}'` : `90+${anim.clock - 90}'`;
     if (anim.clock >= 96) { anim.done = true; render(true); return; }
-    anim.t = setTimeout(tick, anim.clock === 45 ? 900 : 110);
+    anim.t = setTimeout(tick, anim.clock === 45 ? halfTimePause() : msPerMinute());
   };
   anim.t = setTimeout(tick, 400);
 }
@@ -207,8 +227,15 @@ function animateShootout() {
   kickAnim = { shown: reduced() ? n : 0 };
   render(true);
   if (reduced()) return;
-  const step = () => { if (!kickAnim) return; kickAnim.shown++; render(true); if (kickAnim.shown < n) kickAnim.t = setTimeout(step, 1100); };
-  kickAnim.t = setTimeout(step, 900);
+  /* aggiorna solo tabellone e palloni, così lo slider della velocità resta utilizzabile */
+  const step = () => {
+    if (!kickAnim) return;
+    kickAnim.shown++;
+    const live = $('#shootlive');
+    if (live && kickAnim.shown < n) live.innerHTML = shootLiveHTML(); else render(true);
+    if (kickAnim.shown < n) kickAnim.t = setTimeout(step, kickPause());
+  };
+  kickAnim.t = setTimeout(step, kickPause());
 }
 
 /* ---------- pezzi di interfaccia ---------- */
@@ -289,7 +316,7 @@ function matchHTML(idx, actions) {
   return `<div class="eyebrow">${idx === 0 ? 'Andata' : 'Ritorno'} · in casa di ${esc(T(H).name)}</div>
   <div class="board"><div class="tn" style="color:${TC[H]}">${esc(T(H).name)}</div><div class="sc" id="sc">${sc[0]}–${sc[1]}</div>
     <div class="tn r" style="color:${TC[A]}">${esc(T(A).name)}</div><div class="clock" id="clock">${live ? `${anim.clock}'` : 'Finale'}</div></div>
-  ${live ? '<button class="btn alt" id="skip">Vai al risultato</button>' : actions}
+  ${live ? `${speedHTML()}<button class="btn alt" id="skip">Vai al risultato</button>` : actions}
   <ol class="feed" id="feed">${evs.slice().reverse().map(e => evHTML(e, m, false)).join('')}
     ${!live && !m.events.length ? '<li class="note">Novanta minuti di palla a centrocampo, nessuna emozione.</li>' : ''}</ol>`;
 }
@@ -298,16 +325,20 @@ function legsBox(withPens) {
   return `<div class="legs">${ms.map((m, i) => `<span class="k">${i ? 'Ritorno' : 'Andata'}</span><span class="v">${esc(T(m.home).name)} ${m.score[0]}–${m.score[1]} ${esc(T(m.away).name)}</span>`).join('')}
    ${withPens && pens ? `<span class="k">Rigori</span><span class="v">${esc(T(0).name)} ${pens.g[0]}–${pens.g[1]} ${esc(T(1).name)}</span>` : ''}</div>`;
 }
-function shootoutHTML(actions) {
+function shootLiveHTML() {
   const pens = PENS(), shown = kickAnim ? kickAnim.shown : pens.kicks.length;
   const ks = pens.kicks.slice(0, shown), g = ks.length ? ks[ks.length - 1].g : [0, 0], last = ks[ks.length - 1];
-  return `<div><div class="eyebrow">Inizia ${esc(T(pens.first).name)} (moneta)</div><h1>Lotteria</h1></div>
-  <div class="board"><div class="tn" style="color:${TC[0]}">${esc(T(0).name)}</div><div class="sc">${g[0]}–${g[1]}</div>
+  return `<div class="board"><div class="tn" style="color:${TC[0]}">${esc(T(0).name)}</div><div class="sc">${g[0]}–${g[1]}</div>
     <div class="tn r" style="color:${TC[1]}">${esc(T(1).name)}</div>
     <div class="clock">${last ? `${esc(nm(last.p))}: ${last.ok ? 'gol' : last.how === 'parato' ? 'parato da ' + esc(nm(keeper(1 - last.t))) : 'fuori'}` : 'Pronti'}</div></div>
   <div class="kicks">${[0, 1].map(t => `<div class="krow" style="--tc:${TC[t]}"><div class="kn">${esc(T(t).name)}</div><div class="balls">
-    ${ks.filter(k => k.t === t).map(k => `<span class="ball ${k.ok ? 'g' : 'x'}" title="${esc(nm(k.p))}"></span>`).join('')}</div></div>`).join('')}</div>
-  ${shown >= pens.kicks.length ? actions : '<button class="btn alt" id="skipk">Vai al risultato</button>'}`;
+    ${ks.filter(k => k.t === t).map(k => `<span class="ball ${k.ok ? 'g' : 'x'}" title="${esc(nm(k.p))}"></span>`).join('')}</div></div>`).join('')}</div>`;
+}
+function shootoutHTML(actions) {
+  const pens = PENS(), shown = kickAnim ? kickAnim.shown : pens.kicks.length;
+  return `<div><div class="eyebrow">Inizia ${esc(T(pens.first).name)} (moneta)</div><h1>Lotteria</h1></div>
+  <div id="shootlive" class="duo">${shootLiveHTML()}</div>
+  ${shown >= pens.kicks.length ? actions : `${speedHTML()}<button class="btn alt" id="skipk">Vai al risultato</button>`}`;
 }
 function endHTML(actions) {
   const pens = PENS(), ms = MATCHES(), w = pens ? pens.winner : tieWinner(ms);
@@ -487,6 +518,7 @@ function go(fn) { fn(); saveAll(); render(true); }
 document.addEventListener('input', e => {
   const id = e.target.id;
   if (id === 'pastebox') { D.paste = e.target.value; return; }
+  if (id === 'spd') { setSpeed(+e.target.value); return; }
   const m = id && id.match(/^name(\d)$/); if (!m) return;
   const team = MODE === 'duel' ? D.me : S.teams[+m[1]];
   team.name = e.target.value; saveAll();
@@ -520,6 +552,7 @@ document.addEventListener('click', e => {
       L.restartArm = false; stopAnims(); stopScan();
       return go(() => { if (MODE === 'duel') D = freshDuel(D); else S = freshLocal(S); });
     case 'skip': if (anim) { clearTimeout(anim.t); anim.done = true; } return render(true);
+    case 'fast': return setSpeed(FAST_SPEED);
     case 'skipk': if (kickAnim) { clearTimeout(kickAnim.t); kickAnim.shown = PENS().kicks.length; } return render(true);
   }
   return MODE === 'duel' ? duelClick(b.id) : localClick(b.id);
