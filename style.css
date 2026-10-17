@@ -124,6 +124,10 @@ input.txt.codein{font:800 30px var(--f-display);letter-spacing:.3em;text-transfo
 .ev.goal .t{background:var(--tc);color:#111}
 .ev .d{min-width:0}
 .ev.goal .d{font-weight:700}
+.ev .as{display:block;font-weight:400;font-size:13px;color:var(--muted)}
+.ev.yellow .t{background:#f2c94c;color:#111}
+.ev.red .t{background:#e5484d;color:#fff}
+.pl[disabled]{opacity:.4}
 @keyframes in{from{opacity:.15;transform:translateY(6px)}}
 .legs{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .legs .k{font-family:var(--f-label);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-size:13px;align-self:center}

@@ -26,6 +26,8 @@ Non scrivere mai i livelli in chiaro in un file del repo, in un messaggio di com
 - Livelli nascosti all'interfaccia. Offuscati in `data.js`: Simone accetta che uno smanettone possa ricavarli.
 - Taratura: con medie 2,5 contro 1,8 la più forte vince circa il **65%** (`B = 1.4`, `k = 1.2` in `simMatch`).
 - Sfida: andata e ritorno; passa chi vince più partite. Con una vittoria a testa o due pareggi si va ai rigori: 5 rigoristi in ordine, poi a oltranza ripartendo dal primo.
+- Cronaca: gol con modalità (testa ~18%, rigore ~10%, rovesciata 5%; se normale non si scrive nulla), assist su ~3 gol su 4 (mai su rigore o autogol), gialli (~3 a partita), rossi (~1 ogni 7 partite, diretti o doppio giallo), occasioni (parate, pali/traverse, salvataggi sulla linea, gol annullati, rigori sbagliati). Il portiere non viene espulso.
+- Il rosso pesa: per ogni espulso la squadra segna ×0,7 e l'avversaria ×1,3 da quel minuto (`DOWN_ATT`, `UP_ATT`). Un espulso non compare più nel tabellino e non tira ai rigori (salta al rigorista successivo).
 - Modalità: un telefono (passa-e-gioca) e due telefoni nella stessa stanza (codice squadra via QR). Niente server, niente account: Simone ha scartato Supabase e simili perché troppo complicati.
 
 ## Vincoli tecnici

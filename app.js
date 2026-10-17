@@ -79,9 +79,14 @@ function strength(t) {
   return sum / w;
 }
 const SCORE_W = { ATT: 5, ED: 2.6, ES: 2.6, CC: 2, TD: .8, TS: .8, DC: .6, POR: .02 };
+const ASSIST_W = { CC: 3, ED: 3, ES: 3, ATT: 2, TD: 1.2, TS: 1.2, DC: .4, POR: .05 };
+const FOUL_W = { DC: 3, CC: 2.5, TD: 2, TS: 2, ED: 1.2, ES: 1.2, ATT: 1, POR: 0 }; /* il portiere non viene mai espulso */
 const LVL_W = { 1: .7, 2: 1, 3: 1.5 };
-const shooter = t => { const tm = T(t); return pick(tm.picks, tm.picks.map((id, i) => SCORE_W[slotRole(tm, i)] * LVL_W[lv(id)])); };
-const defender = t => { const tm = T(t); return pick(tm.picks, tm.picks.map((id, i) => ({ DC: 3, TD: 1.5, TS: 1.5, CC: 1, POR: .5 })[slotRole(tm, i)] || .3)); };
+/* ex = giocatori già espulsi, che non possono più comparire nel tabellino */
+const shooter = (t, ex = []) => { const tm = T(t); return pick(tm.picks, tm.picks.map((id, i) => ex.includes(id) ? 0 : SCORE_W[slotRole(tm, i)] * LVL_W[lv(id)])); };
+const assister = (t, sc, ex = []) => { const tm = T(t); return pick(tm.picks, tm.picks.map((id, i) => id === sc || ex.includes(id) ? 0 : ASSIST_W[slotRole(tm, i)] * LVL_W[lv(id)])); };
+const defender = (t, ex = []) => { const tm = T(t); return pick(tm.picks, tm.picks.map((id, i) => ex.includes(id) ? 0 : ({ DC: 3, TD: 1.5, TS: 1.5, CC: 1, POR: .5 })[slotRole(tm, i)] || .3)); };
+const fouler = (t, ex = []) => { const tm = T(t); return pick(tm.picks, tm.picks.map((id, i) => ex.includes(id) ? 0 : FOUL_W[slotRole(tm, i)])); };
 const keeper = t => T(t).picks[0];
 function minute() {
   const r = rnd();
@@ -89,6 +94,9 @@ function minute() {
   if (r < .11) return { m: 90, x: 1 + Math.floor(rnd() * 5) };
   return { m: 1 + Math.floor(rnd() * 89), x: 0 };
 }
+const evKey = e => e.m * 10 + e.x;
+/* in inferiorità numerica si segna meno e si subisce di più (per ogni espulso) */
+const DOWN_ATT = .7, UP_ATT = 1.3;
 /* B e k tarati: con medie 2,5 contro 1,8 la squadra più forte vince circa il 65% delle partite */
 function simMatch(home, away) {
   const B = 1.4, k = 1.2, HOME = .08;
@@ -96,31 +104,75 @@ function simMatch(home, away) {
   const sh = STYLES[T(home).style], sa = STYLES[T(away).style];
   const lam = [q6(B * Math.exp(k * d / 2) * sh.att * sa.def), q6(B * Math.exp(-k * d / 2) * sa.att * sh.def)];
   const side = [home, away], ev = [];
+
+  /* cartellini: prima tutti, in ordine di minuto, così si sa chi è in campo e quando */
+  const cards = [], nY = poisson(3.4);
+  for (let n = 0; n < nY; n++) cards.push({ ...minute(), side: rnd() < .5 ? 0 : 1, type: 'yellow' });
+  if (rnd() < .07) cards.push({ ...minute(), side: rnd() < .5 ? 0 : 1, type: 'red' });
+  cards.sort((a, b) => evKey(a) - evKey(b));
+  const outAt = [[], []], booked = [new Set(), new Set()];  /* outAt: [id, minuto] degli espulsi */
+  const ex = (j, key) => outAt[j].filter(o => o[1] <= key).map(o => o[0]);
+  cards.forEach(c => {
+    c.p = fouler(side[c.side], ex(c.side, evKey(c)));
+    /* l'arbitro grazia spesso chi è già ammonito: il secondo giallo arriva una volta su quattro */
+    if (c.type === 'yellow' && booked[c.side].has(c.p) && rnd() < .75) c.p = fouler(side[c.side], ex(c.side, evKey(c)).concat([...booked[c.side]]));
+    if (c.type === 'yellow' && booked[c.side].has(c.p)) c.type = 'red2';
+    booked[c.side].add(c.p);
+    if (c.type !== 'yellow') { outAt[c.side].push([c.p, evKey(c)]); c.n = 11 - outAt[c.side].length; }
+    ev.push(c);
+  });
+  const factor = (j, key) => { let f = 1; for (let i = ex(j, key).length; i > 0; i--) f *= DOWN_ATT; for (let i = ex(1 - j, key).length; i > 0; i--) f *= UP_ATT; return f; };
+  const reds = outAt[0].length + outAt[1].length;
+
+  /* gol: con un espulso si scartano o si aggiungono gol in base al minuto (thinning) */
   [0, 1].forEach(j => {
-    const t = side[j], o = side[1 - j], g = poisson(lam[j]);
+    const t = side[j], o = side[1 - j];
+    let mx = 1; for (let i = outAt[1 - j].length; i > 0; i--) mx *= UP_ATT;
+    const g = poisson(q6(lam[j] * mx));
     for (let n = 0; n < g; n++) {
-      if (rnd() < .04) ev.push({ ...minute(), side: j, type: 'og', p: defender(o) });
-      else ev.push({ ...minute(), side: j, type: 'goal', p: shooter(t) });
+      const mm = minute(), key = evKey(mm);
+      if (reds && rnd() * mx > factor(j, key)) continue;
+      if (rnd() < .04) { ev.push({ ...mm, side: j, type: 'og', p: defender(o, ex(1 - j, key)) }); continue; }
+      const r = rnd(), how = r < .05 ? 'bike' : r < .15 ? 'pen' : r < .33 ? 'head' : '';
+      const e = { ...mm, side: j, type: 'goal', p: shooter(t, ex(j, key)) };
+      if (how) e.how = how;
+      if (how !== 'pen' && rnd() < .75) e.a = assister(t, e.p, ex(j, key));
+      ev.push(e);
     }
   });
-  const extra = poisson(2.6);
+
+  /* occasioni mancate */
+  const extra = poisson(5.5);
   for (let n = 0; n < extra; n++) {
-    const j = rnd() < lam[0] / (lam[0] + lam[1]) ? 0 : 1, t = side[j], o = side[1 - j], r = rnd();
-    if (r < .45) ev.push({ ...minute(), side: j, type: 'save', p: shooter(t), gk: keeper(o) });
-    else if (r < .75) ev.push({ ...minute(), side: j, type: 'post', p: shooter(t) });
-    else ev.push({ ...minute(), side: j, type: 'miss', p: shooter(t) });
+    const j = rnd() < lam[0] / (lam[0] + lam[1]) ? 0 : 1, t = side[j], o = side[1 - j], mm = minute(), key = evKey(mm), r = rnd();
+    const e = { ...mm, side: j, p: shooter(t, ex(j, key)) };
+    if (r < .32) Object.assign(e, { type: 'save', gk: keeper(o) });
+    else if (r < .50) e.type = 'post';
+    else if (r < .68) e.type = 'miss';
+    else if (r < .79) Object.assign(e, { type: 'line', d: defender(o, ex(1 - j, key)) });
+    else if (r < .91) e.type = 'offside';
+    else Object.assign(e, { type: 'penmiss', gk: keeper(o), saved: rnd() < .6 });
+    ev.push(e);
   }
-  ev.sort((a, b) => (a.m * 10 + a.x) - (b.m * 10 + b.x));
+  ev.sort((a, b) => evKey(a) - evKey(b));
   const score = [0, 0];
   ev.forEach(e => { if (e.type === 'goal' || e.type === 'og') { score[e.side]++; e.sc = [...score]; } });
   return { home, away, events: ev, score };
 }
-function simShootout() {
+/* espulsi di una partita, per squadra (0/1): ai rigori non possono tirare */
+function sentOff(m) {
+  const s = [[], []];
+  if (m) m.events.forEach(e => { if (e.type === 'red' || e.type === 'red2') s[e.side ? m.away : m.home].push(e.p); });
+  return s;
+}
+function simShootout(out = [[], []]) {
   const first = rnd() < .5 ? 0 : 1, kicks = [], g = [0, 0], n = [0, 0];
   const pScore = (sh, gk) => .74 + (lv(sh) - 2) * .07 - (lv(keeper(gk)) - 2) * .05;
+  /* un rigorista espulso salta il turno: si passa al successivo nella lista */
+  const takers = [0, 1].map(t => { const l = T(t).pens.filter(id => !out[t].includes(id)); return l.length ? l : T(t).picks.filter(id => !out[t].includes(id)); });
   for (let i = 0; ; i++) {
     const t = i % 2 ? 1 - first : first;
-    const sh = T(t).pens[n[t] % 5];
+    const sh = takers[t][n[t] % takers[t].length];
     const ok = rnd() < pScore(sh, 1 - t);
     n[t]++; if (ok) g[t]++;
     kicks.push({ t, p: sh, ok, how: ok ? 'gol' : (rnd() < .6 ? 'parato' : 'fuori'), g: [...g] });
@@ -142,7 +194,7 @@ const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').re
 const unb64u = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Array.from(atob(s), c => c.charCodeAt(0)); };
 function encodeTeam(t) {
   const name = Array.from(new TextEncoder().encode(t.name.slice(0, 20)));
-  const bytes = [1, ROSTER_H, (FORM_KEYS.indexOf(t.form) << 2) | STYLE_KEYS.indexOf(t.style), ...t.picks, ...t.pens.map(id => t.picks.indexOf(id)), name.length, ...name];
+  const bytes = [2, ROSTER_H, (FORM_KEYS.indexOf(t.form) << 2) | STYLE_KEYS.indexOf(t.style), ...t.picks, ...t.pens.map(id => t.picks.indexOf(id)), name.length, ...name];
   let c = 7; bytes.forEach(b => { c = (c * 31 + b) & 255; }); bytes.push(c);
   return CODE_PREFIX + b64u(bytes);
 }
@@ -154,7 +206,7 @@ function decodeTeam(code) {
   if (b.length < 21) fail('Codice incompleto.');
   let c = 7; b.slice(0, -1).forEach(x => { c = (c * 31 + x) & 255; });
   if (c !== b[b.length - 1]) fail('Codice rovinato: copialo di nuovo.');
-  if (b[0] !== 1) fail('Codice di una versione diversa del gioco.');
+  if (b[0] !== 2) fail('Codice di una versione diversa del gioco.');
   if (b[1] !== ROSTER_H) fail('I due telefoni hanno liste giocatori diverse: ricaricate la pagina su tutti e due.');
   const form = FORM_KEYS[b[2] >> 2], style = STYLE_KEYS[b[2] & 3];
   const picks = b.slice(3, 14), slots = b.slice(14, 19);
@@ -172,7 +224,7 @@ function buildDuel() {
   D.myIdx = x === D.myCode ? 0 : 1;
   const seed = hashStr(x + '|' + y + '|' + D.rematch);
   D.check = (seed >>> 0).toString(36).toUpperCase().slice(-4).padStart(4, '0');
-  D.all = withSeed(seed, () => ({ m: [simMatch(0, 1), simMatch(1, 0)], pens: simShootout() }));
+  D.all = withSeed(seed, () => { const m = [simMatch(0, 1), simMatch(1, 0)]; return { m, pens: simShootout(sentOff(m[1])) }; });
   D.shown = 0; D.phase = 'reveal';
 }
 
@@ -283,30 +335,40 @@ function draftHTML(t, team, opts, sel, slot) {
   ${pitchHTML(team, t, { cur: slot })}
   <p class="note">${esc(team.form)} · ${STYLES[team.style].lab}. Un solo rimescolo per tutto il draft.</p>`;
 }
-function penListHTML(t, team) {
+function penListHTML(t, team, out = []) {
   return `<div class="plist" style="--tc:${TC[t]}">${team.picks.map((id, i) => {
-    const k = team.pens.indexOf(id);
-    return `<button class="pl" data-pen="${id}" aria-pressed="${k >= 0}"><span class="ord">${k >= 0 ? k + 1 : ''}</span><span class="pn">${esc(nm(id))}</span><span class="pr">${slotRole(team, i)}</span></button>`;
+    const k = team.pens.indexOf(id), off = out.includes(id);
+    return `<button class="pl" data-pen="${id}" aria-pressed="${k >= 0}" ${off ? 'disabled' : ''}><span class="ord">${k >= 0 ? k + 1 : ''}</span><span class="pn">${esc(nm(id))}</span><span class="pr">${off ? 'espulso' : slotRole(team, i)}</span></button>`;
   }).join('')}</div>`;
 }
 function revealSides(editable) {
   return `<div class="duo">${[0, 1].map(t => `<div class="side" style="--tc:${TC[t]}"><div class="sidehead">${nameBlock(t, T(t), { editable })}
     <span class="chip o">${T(t).form} · ${STYLES[T(t).style].lab}</span></div>${pitchHTML(T(t), t, { small: true })}</div>`).join('')}</div>`;
 }
+const HOW = { head: 'di testa', pen: 'su rigore', bike: 'in rovesciata!' };
+/* variante di frase scelta dal minuto e dal giocatore: niente rnd(), così il seme non cambia */
+const vary = (e, list) => list[(e.m * 7 + e.x * 3 + e.p) % list.length];
 function evParts(e, m) {
-  const tn = T(e.side ? m.away : m.home).name;
+  const tn = T(e.side ? m.away : m.home).name, p = esc(nm(e.p));
   switch (e.type) {
-    case 'goal': return ['GOL', `${esc(nm(e.p))} <span class="muted">(${esc(tn)})</span>`];
-    case 'og': return ['AUTOGOL', `${esc(nm(e.p))} la mette nella sua porta`];
-    case 'save': return ['PARATA', `${esc(nm(e.gk))} dice no a ${esc(nm(e.p))}`];
-    case 'post': return ['PALO', `${esc(nm(e.p))} colpisce il legno`];
-    default: return ['FUORI', `${esc(nm(e.p))} spreca da buona posizione`];
+    case 'goal': return [e.how === 'pen' ? 'RIGORE' : 'GOL', `${p}${e.how ? ' ' + HOW[e.how] : ''} <span class="muted">(${esc(tn)})</span>${e.a != null ? `<span class="as">assist ${esc(nm(e.a))}</span>` : ''}`];
+    case 'og': return ['AUTOGOL', `${p} la mette nella sua porta`];
+    case 'yellow': return ['GIALLO', vary(e, [`Ammonito ${p}`, `${p} entra duro: giallo`, `Giallo per ${p}, proteste inutili`])];
+    case 'red': return ['ROSSO', `Rosso diretto a ${p}! ${esc(tn)} in ${e.n}`];
+    case 'red2': return ['ROSSO', `Secondo giallo per ${p}, fuori! ${esc(tn)} in ${e.n}`];
+    case 'save': return ['PARATA', vary(e, [`${esc(nm(e.gk))} dice no a ${p}`, `Miracolo di ${esc(nm(e.gk))} su ${p}`, `${p} a botta sicura, ${esc(nm(e.gk))} ci arriva`])];
+    case 'post': return vary(e, [['PALO', `${p} colpisce il palo`], ['TRAVERSA', `${p} centra la traversa`]]);
+    case 'line': return ['SALVATO', `${esc(nm(e.d))} salva sulla linea il tiro di ${p}`];
+    case 'offside': return ['ANNULLATO', `Gol di ${p} annullato per fuorigioco`];
+    case 'penmiss': return ['RIGORE', e.saved ? `${p} dal dischetto: para ${esc(nm(e.gk))}!` : `${p} calcia fuori il rigore`];
+    default: return ['FUORI', vary(e, [`${p} spreca da buona posizione`, `${p} solo davanti alla porta: alto`, `Diagonale di ${p}, fuori di poco`])];
   }
 }
 const minLab = e => e.x ? `${e.m}+${e.x}'` : `${e.m}'`;
 function evHTML(e, m, isNew) {
   const [tag, txt] = evParts(e, m), team = e.side ? m.away : m.home;
-  return `<li class="ev${isNew ? ' new' : ''}${e.type === 'goal' || e.type === 'og' ? ' goal' : ''}" style="--tc:${TC[team]}"><span class="m">${minLab(e)}</span><span class="t">${tag}</span><span class="d">${txt}</span></li>`;
+  const cls = e.type === 'goal' || e.type === 'og' ? ' goal' : e.type === 'yellow' ? ' yellow' : e.type === 'red' || e.type === 'red2' ? ' red' : '';
+  return `<li class="ev${isNew ? ' new' : ''}${cls}" style="--tc:${TC[team]}"><span class="m">${minLab(e)}</span><span class="t">${tag}</span><span class="d">${txt}</span></li>`;
 }
 function matchHTML(idx, actions) {
   const m = MATCHES()[idx], live = anim && anim.idx === idx && !anim.done;
@@ -342,13 +404,14 @@ function shootoutHTML(actions) {
 }
 function endHTML(actions) {
   const pens = PENS(), ms = MATCHES(), w = pens ? pens.winner : tieWinner(ms);
-  const goals = [{}, {}];
-  ms.forEach(m => m.events.forEach(e => { if (e.type === 'goal') { const t = e.side ? m.away : m.home; goals[t][e.p] = (goals[t][e.p] || 0) + 1; } }));
+  const goals = [{}, {}], assists = [{}, {}];
+  ms.forEach(m => m.events.forEach(e => { if (e.type === 'goal') { const t = e.side ? m.away : m.home; goals[t][e.p] = (goals[t][e.p] || 0) + 1; if (e.a != null) assists[t][e.a] = (assists[t][e.a] || 0) + 1; } }));
+  const list = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${esc(nm(+id))}${n > 1 ? ' ×' + n : ''}`).join(', ');
   const sc = t => Object.entries(goals[t]).sort((a, b) => b[1] - a[1]).map(([id, n]) => `${esc(nm(+id))}${n > 1 ? ' ×' + n : ''}`).join(', ') || 'nessuno';
   return `<div class="winner" style="--tc:${TC[w]}"><div class="eyebrow">Passa il turno</div><div class="big">${esc(T(w).name)}</div>
     ${pens ? '<p class="note">ai calci di rigore</p>' : ''}</div>
   ${legsBox(true)}
-  <div class="scorers">${[0, 1].map(t => `<p><b style="color:${TC[t]}">${esc(T(t).name)}</b> · ${sc(t)}</p>`).join('')}</div>${actions}`;
+  <div class="scorers">${[0, 1].map(t => `<p><b style="color:${TC[t]}">${esc(T(t).name)}</b> · ${sc(t)}${list(assists[t]) ? `<br><span class="muted">Assist: ${list(assists[t])}</span>` : ''}</p>`).join('')}</div>${actions}`;
 }
 const intro = `<p class="muted">Per ogni posto in campo escono tre giocatori a caso: ne scegli uno. Andata e ritorno, e se serve si va ai rigori.</p>`;
 const rulesNote = () => `<p class="note">Andata in casa di ${esc(T(0).name)}, ritorno in casa di ${esc(T(1).name)}. Conta chi vince più partite: con una vittoria a testa o due pareggi si va ai rigori.</p>`;
@@ -383,7 +446,7 @@ function localView() {
     const t = S.penTeam;
     return `${header()}<div><div class="eyebrow">Una vittoria a testa o due pareggi</div><h1>Rigori</h1></div>${legsBox(false)}
       <div>${nameBlock(t, T(t), { chip: true })}<p style="margin-top:8px">Scegli i 5 rigoristi in ordine. Se dopo cinque è ancora pari, si riparte dal primo.</p></div>
-      ${penListHTML(t, T(t))}
+      ${penListHTML(t, T(t), sentOff(S.matches[1])[t])}
       <button class="btn ${t ? 'b' : ''}" id="penok" ${T(t).pens.length < 5 ? 'disabled' : ''}>${t === 0 ? `Conferma e passa a ${esc(T(1).name)}` : 'Si tira'}</button>`;
   }
   if (ph === 'shootout') return header() + shootoutHTML('<button class="btn" id="final">Risultato finale</button>');
@@ -579,7 +642,7 @@ function localClick(id) {
       if (T(S.penTeam).pens.length < 5) return;
       top0();
       if (S.penTeam === 0) return go(() => { S.penTeam = 1; });
-      S.pens = simShootout(); S.phase = 'shootout'; saveAll(); return animateShootout();
+      S.pens = simShootout(sentOff(S.matches[1])); S.phase = 'shootout'; saveAll(); return animateShootout();
     case 'final': kickAnim = null; top0(); return go(() => { S.phase = 'end'; });
     case 'again': stopAnims(); top0(); return go(() => { S.matches = []; S.pens = null; S.teams.forEach(t => { t.pens = []; }); S.phase = 'reveal'; });
     case 'newdraft': stopAnims(); top0(); return go(() => { S = freshLocal(S); });

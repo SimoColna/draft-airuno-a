@@ -110,5 +110,28 @@ test('taratura: squadra forte contro debole', () => {
   assert.ok(res.win > 0.6 && res.win < 0.97);
 });
 
+test('cronaca: modalità dei gol, assist, cartellini ed espulsi', () => {
+  const p = phone();
+  const res = JSON.parse(p.ev(`(()=>{
+    const mk=o=>({name:'x',form:'4-4-2',style:'bal',picks:PL.slice(o,o+11).map(x=>x.id),pens:[]});
+    S.teams=[mk(0),mk(20)];
+    let goals=0,bike=0,bad=0,red=0,diffRed=0,diffNo=0,nRed=0,nNo=0;const N=20000;
+    for(let i=0;i<N;i++){const m=simMatch(0,1),out=new Set();let downSide=-1;
+      for(const e of m.events){
+        const own=e.type==='og'?1-e.side:e.side;
+        if(out.has(own+':'+e.p)||(e.a!=null&&out.has(e.side+':'+e.a))||(e.d!=null&&out.has((1-e.side)+':'+e.d)))bad++;
+        if(e.type==='goal'){goals++;if(e.how==='bike')bike++;if(e.a===e.p||(e.how==='pen'&&e.a!=null))bad++;}
+        if(e.type==='red'||e.type==='red2'){red++;out.add(e.side+':'+e.p);if(downSide<0)downSide=e.side;}
+        if(e.type==='red2'&&!m.events.some(y=>y.type==='yellow'&&y.side===e.side&&y.p===e.p))bad++;
+      }
+      if(downSide>=0){nRed++;diffRed+=m.score[downSide]-m.score[1-downSide];}else{nNo++;diffNo+=m.score[0]-m.score[1];}
+    }
+    return JSON.stringify({bike:bike/goals,bad,red:red/N,effetto:diffNo/nNo/2-diffRed/nRed});})()`));
+  console.log(`      rovesciate ${(res.bike * 100).toFixed(1)}% dei gol, rossi ${res.red.toFixed(2)} a partita`);
+  assert.equal(res.bad, 0);
+  assert.ok(res.bike > .035 && res.bike < .065);
+  assert.ok(res.red > .08 && res.red < .3);
+});
+
 console.log(failures ? `\n${failures} test falliti` : '\nTutti i test passati');
 process.exit(failures ? 1 : 0);
